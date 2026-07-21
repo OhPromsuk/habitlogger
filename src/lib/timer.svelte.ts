@@ -72,7 +72,7 @@ class TimerEngine {
         }
     }
 
-    start(activityId: string, activityName: string, colorHsl = '220, 80%, 60%', icon = '⏱') {
+    start(activityId: string, activityName: string, colorHsl = '220, 80%, 60%', icon = '⏱', comment = '') {
         const instanceId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         const now = new Date();
 
@@ -86,7 +86,7 @@ class TimerEngine {
             elapsedSeconds: 0,
             isPaused: false,
             accumulatedSeconds: 0,
-            comment: '',
+            comment,
             intervals: []
         };
 
@@ -217,7 +217,11 @@ class TimerEngine {
     private async saveIntervalLog(activityId: string, startTime: Date, endTime: Date, durationSecs: number, comment: string) {
         if (durationSecs <= 0) return;
         try {
-            const today = endTime.toISOString().split('T')[0];
+            // Get local date string YYYY-MM-DD
+            const year = endTime.getFullYear();
+            const month = String(endTime.getMonth() + 1).padStart(2, '0');
+            const day = String(endTime.getDate()).padStart(2, '0');
+            const today = `${year}-${month}-${day}`;
 
             // If using mockup activity ID (non-UUID format), fetch actual UUID or bypass
             let targetActivityId = activityId;

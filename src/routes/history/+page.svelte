@@ -9,37 +9,48 @@
     let activities = $state<any[]>([]);
     let isLoading = $state(true);
     let searchQuery = $state('');
-    let weekOffset = $state(0); // 0 = this week
-    let showSeconds = $state(true);
+    
+    
+    // selectedDate is always the specific day being shown
+    let selectedDate = $state<Date>((() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d;
+    })());
 
-    // Selected item for shared Modal
-    let selectedModalItem = $state<{
-        type: 'active' | 'log';
-        activeTimer?: ActiveTimer;
-        logData?: any;
-    } | null>(null);
-
-    const weekRange = $derived.by(() => {
-        const now = new Date();
-        now.setDate(now.getDate() + weekOffset * 7);
-        const day = now.getDay();
-        const mon = new Date(now);
-        mon.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-        const sun = new Date(mon);
-        sun.setDate(mon.getDate() + 6);
-        return { start: mon, end: sun };
+    // Always show exactly 1 day – viewMode only changes how far the arrows jump
+    const dateRange = $derived.by(() => {
+        const start = new Date(selectedDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(selectedDate);
+        end.setHours(23, 59, 59, 999);
+        return { start, end };
     });
 
-    const weekLabel = $derived.by(() => {
-        const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-        return `${fmt(weekRange.start)} - ${fmt(weekRange.end)}`;
+    const dateLabel = $derived.by(() => {
+        return dateRange.start.toLocaleDateString('th-TH', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
     });
 
-    const weekTotal = $derived.by(() => {
+    // Is the selected date today?
+    const isToday = $derived.by(() => {
+        const today = new Date();
+        return (
+            selectedDate.getFullYear() === today.getFullYear() &&
+            selectedDate.getMonth() === today.getMonth() &&
+            selectedDate.getDate() === today.getDate()
+        );
+    });
+
+    const timeTotal = $derived.by(() => {
         return logs.reduce((sum, l) => sum + Number(l.duration_seconds || 0), 0);
     });
 
-    function formatWeekTotal(secs: number) {
+    function formatTimeTotal(secs: number) {
         const hrs = Math.floor(secs / 3600);
         const mins = Math.floor((secs % 3600) / 60);
         const s = secs % 60;
@@ -48,6 +59,55 @@
         }
         return `${hrs} h ${mins} m`;
     }
+
+    // Missing declarations needed by functions above
+    let selectedModalItem = $state<{
+        type: 'active' | 'log';
+        activeTimer?: ActiveTimer;
+        logData?: any;
+    } | null>(null);
+
+    let showSeconds = $state(true);
+
+    async function fetchLogs() {
+        isLoading = true;
+        
+        const start = dateRange.start;
+        const startYear = start.getFullYear();
+        const startMonth = String(start.getMonth() + 1).padStart(2, '0');
+        const startDay = String(start.getDate()).padStart(2, '0');
+        const startStr = `${startYear}-${startMonth}-${startDay}`;
+
+        const end = dateRange.end;
+        const endYear = end.getFullYear();
+        const endMonth = String(end.getMonth() + 1).padStart(2, '0');
+        const endDay = String(end.getDate()).padStart(2, '0');
+        const endStr = `${endYear}-${endMonth}-${endDay}`;
+
+        // Fetch activities for dropdown
+        const { data: actData } = await supabase.from('activities').select('*');
+        if (actData) activities = actData;
+
+        const { data, error } = await supabase
+            .from('activity_logs')
+            .select('*, activities(name, color_hsl, icon)')
+            .gte('date', startStr)
+            .lte('date', endStr)
+            .order('date', { ascending: false })
+            .order('created_at', { ascending: false });
+        if (!error) logs = data || [];
+        isLoading = false;
+    }
+
+    // Move selectedDate by the appropriate amount based on the active viewMode
+    function changeDate(delta: number) {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + delta);
+    selectedDate = d;
+    fetchLogs();
+}
+
+
 
     // Group logs by date
     const groupedLogs = $derived.by(() => {
@@ -74,6 +134,75 @@
                 items
             }));
     });
+
+    // ─── Calendar Picker State ───────────────────────────────────────────
+    let calendarOpen = $state(false);
+    let calPivotYear  = $state(new Date().getFullYear());
+    let calPivotMonth = $state(new Date().getMonth()); // 0-indexed
+    let calPickingYear = $state(false); // true → show year grid
+
+    const MONTH_NAMES_TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                            'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    const MONTH_FULL_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
+                           'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+    const DOW_TH = ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา'];
+
+    // Generate grid of day cells for calPivotYear/Month
+    const calendarDays = $derived.by(() => {
+        const year  = calPivotYear;
+        const month = calPivotMonth;
+        const firstDay = new Date(year, month, 1);
+        // 0=Sun, shift so Monday=0
+        const startDow = (firstDay.getDay() + 6) % 7;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const today = new Date();
+        const cells: Array<{ day: number | null; isToday: boolean; isSelected: boolean }> = [];
+        // Leading empty cells
+        for (let i = 0; i < startDow; i++) cells.push({ day: null, isToday: false, isSelected: false });
+        for (let d = 1; d <= daysInMonth; d++) {
+            const isToday = year === today.getFullYear() && month === today.getMonth() && d === today.getDate();
+            const isSelected = year === selectedDate.getFullYear() && month === selectedDate.getMonth() && d === selectedDate.getDate();
+            cells.push({ day: d, isToday, isSelected });
+        }
+        return cells;
+    });
+
+    // Year list for year picker (current year ± 5)
+    const calYearList = $derived.by(() => {
+        const cur = calPivotYear;
+        const years: number[] = [];
+        for (let y = cur - 5; y <= cur + 5; y++) years.push(y);
+        return years;
+    });
+
+    function openCalendar() {
+        calPivotYear  = selectedDate.getFullYear();
+        calPivotMonth = selectedDate.getMonth();
+        calPickingYear = false;
+        calendarOpen = true;
+    }
+
+    function closeCalendar() {
+        calendarOpen = false;
+        calPickingYear = false;
+    }
+
+    function calSelectDay(day: number) {
+        const d = new Date(calPivotYear, calPivotMonth, day);
+        d.setHours(0, 0, 0, 0);
+        selectedDate = d;
+        closeCalendar();
+        fetchLogs();
+    }
+
+    function calPrevMonth() {
+        if (calPivotMonth === 0) { calPivotMonth = 11; calPivotYear--; }
+        else calPivotMonth--;
+    }
+    function calNextMonth() {
+        if (calPivotMonth === 11) { calPivotMonth = 0; calPivotYear++; }
+        else calPivotMonth++;
+    }
 
     function getLogCommentTag(notes: string | null): string {
         if (!notes) return '';
@@ -113,30 +242,6 @@
         return `${fmt(start)} - ${fmt(end)}`;
     }
 
-    async function fetchLogs() {
-        isLoading = true;
-        const startStr = weekRange.start.toISOString().split('T')[0];
-        const endStr = weekRange.end.toISOString().split('T')[0];
-
-        // Fetch activities for dropdown
-        const { data: actData } = await supabase.from('activities').select('*');
-        if (actData) activities = actData;
-
-        const { data, error } = await supabase
-            .from('activity_logs')
-            .select('*, activities(name, color_hsl, icon)')
-            .gte('date', startStr)
-            .lte('date', endStr)
-            .order('date', { ascending: false })
-            .order('created_at', { ascending: false });
-        if (!error) logs = data || [];
-        isLoading = false;
-    }
-
-    function changeWeek(delta: number) {
-        weekOffset += delta;
-        fetchLogs();
-    }
 
     onMount(() => {
         if (typeof window !== 'undefined') {
@@ -359,20 +464,80 @@
     {/if}
 </header>
 
-<!-- Week Navigation Bar -->
-<div class="history-header-bar">
-    <button class="week-nav-btn" onclick={() => changeWeek(-1)}>
-        <ChevronLeft size={22} />
-    </button>
-    <div class="week-info">
-        <div class="week-dates">{weekLabel}</div>
-        <div class="week-tracked">Time tracked: {formatWeekTotal(weekTotal)}</div>
+<!-- Date Navigation Bar -->
+<div class="history-nav-bar">
+    <div class="history-date-row">
+        <button class="nav-arrow-btn" onclick={() => changeDate(-1)}>
+            <ChevronLeft size={22} />
+        </button>
+
+        <!-- Clickable date label → opens calendar -->
+        <button class="date-label-block" onclick={openCalendar}>
+            <div class="date-label-text">{dateLabel}</div>
+            <div class="time-tracked-text">Time tracked: {formatTimeTotal(timeTotal)}</div>
+        </button>
+
+        <button class="nav-arrow-btn" onclick={() => changeDate(1)}
+            disabled={isToday}>
+            <ChevronRight size={22} />
+        </button>
     </div>
-    <button class="week-nav-btn" onclick={() => changeWeek(1)}
-        disabled={weekOffset >= 0}>
-        <ChevronRight size={22} />
-    </button>
 </div>
+
+<!-- Calendar Picker Popup -->
+{#if calendarOpen}
+    <div class="cal-overlay" onclick={closeCalendar}>
+        <div class="cal-popup" onclick={e => e.stopPropagation()}>
+
+            {#if calPickingYear}
+                <!-- Year Picker -->
+                <div class="cal-header">
+                    <button class="cal-nav-btn" onclick={() => { calPivotYear -= 10; }}>«</button>
+                    <span class="cal-month-label">เลือกปี</span>
+                    <button class="cal-nav-btn" onclick={() => { calPivotYear += 10; }}>»</button>
+                </div>
+                <div class="cal-year-grid">
+                    {#each calYearList as y}
+                        <button
+                            class="cal-year-cell {y === calPivotYear ? 'selected' : ''}"
+                            onclick={() => { calPivotYear = y; calPickingYear = false; }}
+                        >{y}</button>
+                    {/each}
+                </div>
+            {:else}
+                <!-- Month Calendar -->
+                <div class="cal-header">
+                    <button class="cal-nav-btn" onclick={calPrevMonth}>‹</button>
+                    <button class="cal-month-label clickable-label" onclick={() => calPickingYear = true}>
+                        {MONTH_FULL_TH[calPivotMonth]} {calPivotYear + 543}
+                    </button>
+                    <button class="cal-nav-btn" onclick={calNextMonth}>›</button>
+                </div>
+
+                <!-- Day of week headers -->
+                <div class="cal-dow-row">
+                    {#each DOW_TH as d}
+                        <span class="cal-dow">{d}</span>
+                    {/each}
+                </div>
+
+                <!-- Calendar days grid -->
+                <div class="cal-days-grid">
+                    {#each calendarDays as cell}
+                        {#if cell.day === null}
+                            <span class="cal-day empty"></span>
+                        {:else}
+                            <button
+                                class="cal-day {cell.isSelected ? 'selected' : ''} {cell.isToday ? 'today' : ''}"
+                                onclick={() => calSelectDay(cell.day!)}
+                            >{cell.day}</button>
+                        {/if}
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    </div>
+{/if}
 
 <!-- Search Bar -->
 <div class="history-search">
@@ -383,8 +548,8 @@
     </div>
 </div>
 
-<!-- Active Timers in History Section (WeekOffset === 0) -->
-{#if weekOffset === 0 && timerEngine.activeTimers.length > 0}
+<!-- Active Timers in History Section (today only) -->
+{#if isToday && timerEngine.activeTimers.length > 0}
     <div class="active-timers-history-block">
         <div class="active-section-label">🔴 Currently Active / Paused Timers</div>
         {#each timerEngine.activeTimers as activeTimer}
@@ -427,7 +592,7 @@
 {#if isLoading}
     <div class="spinner"></div>
 {:else if groupedLogs.length === 0 && timerEngine.activeTimers.length === 0}
-    <p class="empty-msg">No logs this week.</p>
+    <p class="empty-msg">No logs this day.</p>
 {:else}
     {#each groupedLogs as group}
         <div class="history-date-group">
@@ -583,6 +748,236 @@
 {/if}
 
 <style>
+    /* Navigation Bar with View Mode Tabs */
+    .history-nav-bar {
+        background-color: var(--bg-header);
+        border-bottom: 1px solid var(--border-color);
+        position: sticky;
+        top: var(--header-height);
+        z-index: 9;
+    }
+
+    .history-date-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 8px 6px;
+        gap: 4px;
+    }
+
+    .nav-arrow-btn {
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        padding: 6px 8px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        transition: background-color 0.15s ease;
+        flex-shrink: 0;
+    }
+
+    .nav-arrow-btn:hover {
+        background-color: var(--bg-tertiary);
+    }
+
+    .nav-arrow-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
+    .date-label-block {
+        flex: 1;
+        text-align: center;
+    }
+
+    .date-label-text {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.3;
+    }
+
+    .time-tracked-text {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-top: 1px;
+    }
+
+    .view-mode-tabs {
+        display: flex;
+        align-items: center;
+        padding: 0 12px 10px;
+        gap: 6px;
+    }
+
+    .view-mode-tab {
+        flex: 1;
+        padding: 6px 4px;
+        border: none;
+        background: none;
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        letter-spacing: 0.3px;
+    }
+
+    .view-mode-tab:hover {
+        background-color: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .view-mode-tab.active {
+        background-color: var(--bg-tertiary);
+        color: var(--text-primary);
+        border-bottom: 2px solid #4a90d9;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+    }
+
+    /* ─── Calendar Picker ─────────────────────────────── */
+    .cal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.45);
+        z-index: 100;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 110px;
+    }
+
+    .cal-popup {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 18px;
+        padding: 16px;
+        width: 320px;
+        max-width: 92vw;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+        animation: calFadeIn 0.18s ease;
+    }
+
+    @keyframes calFadeIn {
+        from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .cal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+    }
+
+    .cal-nav-btn {
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        font-size: 22px;
+        font-weight: 700;
+        cursor: pointer;
+        padding: 2px 8px;
+        border-radius: 8px;
+        line-height: 1;
+        transition: background 0.12s;
+    }
+
+    .cal-nav-btn:hover { background: var(--bg-tertiary); }
+
+    .cal-month-label {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .clickable-label {
+        background: none;
+        border: none;
+        cursor: pointer;
+        border-radius: 8px;
+        padding: 3px 8px;
+        transition: background 0.12s;
+    }
+
+    .clickable-label:hover { background: var(--bg-tertiary); }
+
+    .cal-dow-row {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        margin-bottom: 4px;
+    }
+
+    .cal-dow {
+        text-align: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-secondary);
+        padding: 4px 0;
+    }
+
+    .cal-days-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+    }
+
+    .cal-day {
+        aspect-ratio: 1;
+        border: none;
+        background: none;
+        border-radius: 50%;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.12s;
+    }
+
+    .cal-day.empty { cursor: default; }
+
+    .cal-day:not(.empty):hover { background: var(--bg-tertiary); }
+
+    .cal-day.today {
+        border: 2px solid #4a90d9;
+        color: #4a90d9;
+        font-weight: 700;
+    }
+
+    .cal-day.selected {
+        background: #4a90d9;
+        color: white;
+        font-weight: 700;
+    }
+
+    .cal-year-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+    }
+
+    .cal-year-cell {
+        padding: 10px 0;
+        border: none;
+        border-radius: 10px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.12s;
+    }
+
+    .cal-year-cell:hover { background: #4a90d9; color: white; }
+
+    .cal-year-cell.selected { background: #4a90d9; color: white; }
+
     .active-timers-history-block {
         margin: 12px 16px;
         display: flex;

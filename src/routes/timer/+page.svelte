@@ -17,8 +17,40 @@
     // Modal States
     let showManualLogModal = $state(false);
     let showNewActivityModal = $state(false);
+    let showSelectActivityModal = $state(false);
     let selectedActiveSession = $state<ActiveTimer | null>(null);
     let isSubmitting = $state(false);
+
+    // Start Timer Modal State
+    let startActivitySearch = $state('');
+    let startSelectedActId = $state('');
+    let startComment = $state('');
+    let startDate = $state(new Date().toISOString().split('T')[0]);
+    let startTime = $state(new Date().toTimeString().slice(0, 5));
+
+    const filteredStartActivities = $derived(
+        activities.filter(a =>
+            a.name.toLowerCase().includes(startActivitySearch.toLowerCase()) ||
+            (a.icon || '').includes(startActivitySearch)
+        )
+    );
+
+    function openStartModal() {
+        const now = new Date();
+        startDate = now.toISOString().split('T')[0];
+        startTime = now.toTimeString().slice(0, 5);
+        startActivitySearch = '';
+        startSelectedActId = activities.length > 0 ? '' : '';
+        startComment = '';
+        showSelectActivityModal = true;
+    }
+
+    function confirmStartTimer() {
+        const act = activities.find(a => a.id === startSelectedActId);
+        if (!act) return;
+        timerEngine.start(act.id, act.name, act.color_hsl || '210, 85%, 55%', act.icon || '📌', startComment.trim() || undefined);
+        showSelectActivityModal = false;
+    }
 
     // New Activity Form State
     let newActName = $state('');
@@ -479,7 +511,7 @@
     {/if}
 
     <!-- Floating Action Buttons wrapper (Hidden when any modal or select mode is open) -->
-    {#if !selectedActiveSession && !showManualLogModal && !isSelectMode}
+    {#if !selectedActiveSession && !showManualLogModal && !showSelectActivityModal && !isSelectMode}
         <div class="fab-wrapper">
             <!-- Quick Navigation Stack (Top / Bottom buttons) -->
             <div class="nav-scroll-stack">
@@ -501,14 +533,113 @@
 
             <button
                 class="fab-add-btn"
-                onclick={() => showNewActivityModal = true}
-                title="Create New Activity Category (สร้างกิจกรรมใหม่)"
+                onclick={openStartModal}
+                title="เริ่มจับเวลากิจกรรม (Start Timer)"
             >
                 <Plus size={30} strokeWidth={3} />
             </button>
         </div>
     {/if}
 </div>
+
+<!-- Modal: Start Timer (Redesigned like reference app) -->
+{#if showSelectActivityModal}
+    <div class="start-modal-overlay" onclick={() => showSelectActivityModal = false}>
+        <div class="start-modal-sheet" onclick={e => e.stopPropagation()}>
+
+            <!-- Header -->
+            <div class="start-modal-header">
+                <button type="button" class="start-close-btn" onclick={() => showSelectActivityModal = false}>
+                    <X size={22} />
+                </button>
+                <span class="start-modal-title">เริ่มจับเวลา</span>
+                <button
+                    type="button"
+                    class="start-confirm-btn {startSelectedActId ? 'active' : ''}"
+                    onclick={confirmStartTimer}
+                    disabled={!startSelectedActId}
+                >
+                    <Check size={22} />
+                </button>
+            </div>
+
+            <div class="start-modal-body">
+
+                <!-- Type / Activity Picker -->
+                <div class="start-section">
+                    <div class="start-section-label">Type</div>
+                    <div class="start-type-picker">
+                        {#if startSelectedActId}
+                            {@const sel = activities.find(a => a.id === startSelectedActId)}
+                            {#if sel}
+                                <div class="start-selected-activity" onclick={() => startSelectedActId = ''}>
+                                    <div class="start-act-icon-circle" style="background-color: hsl({sel.color_hsl || '210,85%,55%'})">
+                                        {sel.icon || '📌'}
+                                    </div>
+                                    <span class="start-act-name" style="color: hsl({sel.color_hsl || '210,85%,55%'})">{sel.name}</span>
+                                    <span class="start-change-hint">แตะเพื่อเปลี่ยน</span>
+                                </div>
+                            {/if}
+                        {:else}
+                            <div class="start-search-box">
+                                <input
+                                    class="start-search-input"
+                                    type="text"
+                                    placeholder="ค้นหากิจกรรม..."
+                                    bind:value={startActivitySearch}
+                                    autofocus
+                                />
+                            </div>
+                            <div class="start-activity-list">
+                                {#if startActivitySearch.trim() !== ''}
+                                    {#each filteredStartActivities as act}
+                                        {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
+                                        <button
+                                            type="button"
+                                            class="start-act-row"
+                                            onclick={() => { startSelectedActId = act.id; startActivitySearch = ''; }}
+                                        >
+                                            <div class="start-act-icon-circle" style="background-color: {color}; width:34px; height:34px; font-size:16px">
+                                                {act.icon || '📌'}
+                                            </div>
+                                            <span class="start-act-name-row">{act.name}</span>
+                                        </button>
+                                    {/each}
+                                    {#if filteredStartActivities.length === 0}
+                                        <p class="start-empty-hint">ไม่พบกิจกรรม</p>
+                                    {/if}
+                                {:else}
+                                    <p class="start-empty-hint">🔍 พิมพ์เพื่อค้นหากิจกรรม...</p>
+                                {/if}
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+
+                <!-- Comment -->
+                <div class="start-section">
+                    <div class="start-section-label">Comment</div>
+                    <input
+                        class="start-comment-input"
+                        type="text"
+                        placeholder="Comment"
+                        bind:value={startComment}
+                    />
+                </div>
+
+                <!-- Started on -->
+                <div class="start-section">
+                    <div class="start-section-label">Started on</div>
+                    <div class="start-datetime-row">
+                        <input class="start-date-input" type="date" bind:value={startDate} />
+                        <input class="start-time-input" type="time" bind:value={startTime} />
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+{/if}
 
 <!-- Modal: Create New Activity Category -->
 {#if showNewActivityModal}
@@ -675,6 +806,228 @@
 {/if}
 
 <style>
+    /* ── Start Timer Modal ─────────────────────────────────── */
+    /* ── Start Timer Modal ─────────────────────────────────── */
+    .start-modal-overlay {
+        position: absolute;
+        inset: 0;
+        background: var(--bg-primary);
+        z-index: 200;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+    }
+
+    .start-modal-sheet {
+        width: 100%;
+        max-width: 480px;
+        height: 100%;
+        background: var(--bg-primary);
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .start-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg-header);
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+
+    .start-modal-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .start-close-btn,
+    .start-confirm-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        transition: color 0.15s, background 0.15s;
+    }
+
+    .start-confirm-btn.active {
+        color: var(--color-success);
+    }
+
+    .start-confirm-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
+    .start-modal-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-primary);
+    }
+
+    .start-section {
+        border-bottom: 1px solid var(--divider-color);
+        padding: 0;
+    }
+
+    .start-section-label {
+        font-size: 11px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 14px 16px 4px;
+    }
+
+    /* Type / activity search */
+    .start-type-picker {
+        padding: 0 0 8px;
+    }
+
+    .start-search-box {
+        padding: 6px 16px 8px;
+    }
+
+    .start-search-input {
+        width: 100%;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 15px;
+        color: var(--text-primary);
+        outline: none;
+        box-sizing: border-box;
+        transition: border-color 0.15s;
+    }
+
+    .start-search-input:focus {
+        border-color: var(--color-success);
+    }
+
+    .start-search-input::placeholder {
+        color: var(--text-muted);
+    }
+
+    .start-activity-list {
+        max-height: 220px;
+        overflow-y: auto;
+    }
+
+    .start-act-row {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.12s;
+    }
+
+    .start-act-row:hover {
+        background: var(--bg-secondary);
+    }
+
+    .start-act-icon-circle {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+    }
+
+    .start-act-name-row {
+        font-size: 15px;
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .start-empty-hint {
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+        padding: 16px;
+        margin: 0;
+    }
+
+    /* Selected activity display */
+    .start-selected-activity {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px 14px;
+        cursor: pointer;
+    }
+
+    .start-act-name {
+        font-size: 20px;
+        font-weight: 600;
+        flex: 1;
+    }
+
+    .start-change-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    /* Comment */
+    .start-comment-input {
+        width: 100%;
+        background: none;
+        border: none;
+        outline: none;
+        font-size: 18px;
+        color: var(--text-primary);
+        padding: 10px 16px 16px;
+        box-sizing: border-box;
+    }
+
+    .start-comment-input::placeholder {
+        color: var(--text-muted);
+    }
+
+    /* Started on */
+    .start-datetime-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 16px 16px;
+        gap: 12px;
+    }
+
+    .start-date-input,
+    .start-time-input {
+        background: none;
+        border: none;
+        outline: none;
+        font-size: 18px;
+        color: var(--text-primary);
+        cursor: pointer;
+        padding: 2px 0;
+        flex: 1;
+    }
+
+    .start-date-input::-webkit-calendar-picker-indicator,
+    .start-time-input::-webkit-calendar-picker-indicator {
+        filter: var(--calendar-icon-filter, none);
+        cursor: pointer;
+    }
+
     .timer-header {
         background-color: #1e62c0;
         padding: 14px 20px;
@@ -1267,5 +1620,69 @@
         border-radius: var(--radius-md);
         font-size: 13px;
         margin-bottom: 12px;
+    }
+
+    /* Select Activity Modal */
+    .select-activity-sheet {
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .select-act-hint {
+        font-size: 13px;
+        color: var(--text-secondary);
+        text-align: center;
+        margin: 0 0 14px;
+    }
+
+    .select-activity-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+        flex: 1;
+        padding-right: 2px;
+    }
+
+    .select-act-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-color);
+        background-color: var(--bg-secondary);
+        cursor: pointer;
+        transition: background-color 0.15s ease, transform 0.1s ease;
+        text-align: left;
+    }
+
+    .select-act-row:hover {
+        background-color: var(--bg-tertiary);
+        transform: translateY(-1px);
+    }
+
+    .select-act-row:active {
+        transform: scale(0.98);
+    }
+
+    .select-act-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+    }
+
+    .select-act-name {
+        flex: 1;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
     }
 </style>

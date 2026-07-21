@@ -30,6 +30,7 @@
   
   --header-height: 56px;
   --bottomnav-height: 56px;
+  --calendar-icon-filter: invert(1) opacity(0.5);
 }
 
 /* Light Theme Override */
@@ -48,6 +49,7 @@
   
   --color-success: #2979ff;
   --color-fail: #cccccc;
+  --calendar-icon-filter: opacity(0.5);
 }
 
 @media (prefers-color-scheme: light) {
@@ -63,6 +65,7 @@
     --divider-color: #eeeeee;
     --color-success: #2979ff;
     --color-fail: #cccccc;
+    --calendar-icon-filter: opacity(0.5);
   }
 }
 
