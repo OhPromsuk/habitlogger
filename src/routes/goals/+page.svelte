@@ -480,14 +480,18 @@
     border: 1px solid rgba(255,255,255,0.06);
 }
 .day-cell.met {
-    background: rgba(var(--goal-rgb, 74, 144, 217), 0.12);
+    background: var(--goal-color);
+    opacity: 0.85;
+}
+.day-cell.met:hover {
+    opacity: 1;
 }
 .day-cell.over {
-    background: rgba(231, 76, 60, 0.1);
+    background: rgba(231, 76, 60, 0.15);
 }
 
-:global(.cell-check) { color: var(--color-success); }
-:global(.cell-x) { color: var(--color-fail); }
+:global(.cell-check) { color: #ffffff !important; }
+:global(.cell-x) { color: var(--color-fail); opacity: 0.3; }
 
 .cell-num {
     font-size: 0.72rem;
