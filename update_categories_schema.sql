@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS categories (
     id UUID PRIMARY KEY DEFAULT gen_random_default(),
     name TEXT NOT NULL,
+    parent_id UUID REFERENCES categories(id) ON DELETE SET NULL,
     color_hsl TEXT DEFAULT '210, 80%, 60%',
     icon TEXT DEFAULT '📁',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

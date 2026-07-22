@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS activities (
     color_hsl TEXT NOT NULL DEFAULT '220, 100%, 50%',
     icon TEXT,
     tracking_type TEXT NOT NULL CHECK (tracking_type IN ('timer', 'boolean', 'numeric')),
-    daily_goal NUMERIC
+    daily_goal NUMERIC,
+    deleted_at TIMESTAMP WITH TIME ZONE NULL
 );
 
 -- Table: activity_logs

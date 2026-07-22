@@ -1,9 +1,96 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { ChevronRight } from "@lucide/svelte";
+    import { ChevronRight, RotateCcw, Trash2, ArrowLeft } from "@lucide/svelte";
+    import { supabase } from "$lib/supabase";
 
     let theme = $state('system');
     let timePrecision = $state<'seconds' | 'minutes'>('seconds');
+
+    // Trash Bin State
+    let showTrash = $state(false);
+    let trashedCategories = $state<any[]>([]);
+    let trashedActivities = $state<any[]>([]);
+    let isLoadingTrash = $state(false);
+
+    async function fetchTrash() {
+        isLoadingTrash = true;
+        try {
+            const [{ data: cats }, { data: acts }] = await Promise.all([
+                supabase.from('categories').select('*').not('deleted_at', 'is', null).order('deleted_at', { ascending: false }),
+                supabase.from('activities').select('*').not('deleted_at', 'is', null).order('deleted_at', { ascending: false })
+            ]);
+            trashedCategories = cats || [];
+            trashedActivities = acts || [];
+        } catch (e) {
+            console.error(e);
+        } finally {
+            isLoadingTrash = false;
+        }
+    }
+
+    function toggleTrashView() {
+        showTrash = !showTrash;
+        if (showTrash) {
+            fetchTrash();
+        }
+    }
+
+    async function restoreItem(id: string, type: 'group' | 'activity') {
+        try {
+            if (type === 'group') {
+                // Restore the group
+                await supabase.from('categories').update({ deleted_at: null }).eq('id', id);
+                // Also restore child categories/activities that were deleted at the same time
+                // (or just restore the category itself)
+            } else {
+                await supabase.from('activities').update({ deleted_at: null }).eq('id', id);
+            }
+            await fetchTrash();
+        } catch (err: any) {
+            alert(err.message || 'เกิดข้อผิดพลาดในการกู้คืน');
+        }
+    }
+
+    async function purgeItem(id: string, type: 'group' | 'activity') {
+        if (!confirm('คุณแน่ใจว่าต้องการลบรายการนี้อย่างถาวร? การกระทำนี้ไม่สามารถเรียกคืนได้')) return;
+        try {
+            if (type === 'group') {
+                await supabase.from('categories').delete().eq('id', id);
+            } else {
+                await supabase.from('activities').delete().eq('id', id);
+            }
+            await fetchTrash();
+        } catch (err: any) {
+            alert(err.message || 'เกิดข้อผิดพลาดในการลบถาวร');
+        }
+    }
+
+    async function emptyTrash() {
+        if (!confirm('คุณแน่ใจว่าต้องการล้างถังขยะทั้งหมดอย่างถาวร?')) return;
+        try {
+            isLoadingTrash = true;
+            // Delete all where deleted_at is not null
+            await Promise.all([
+                supabase.from('categories').delete().not('deleted_at', 'is', null),
+                supabase.from('activities').delete().not('deleted_at', 'is', null)
+            ]);
+            await fetchTrash();
+        } catch (err: any) {
+            alert(err.message || 'เกิดข้อผิดพลาดในการล้างถังขยะ');
+        } finally {
+            isLoadingTrash = false;
+        }
+    }
+
+    function getDaysRemaining(deletedAtStr: string) {
+        if (!deletedAtStr) return 30;
+        const deletedAt = new Date(deletedAtStr);
+        const expireDate = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+        const now = new Date();
+        const diffMs = expireDate.getTime() - now.getTime();
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 0;
+    }
 
     function applyTheme(t: string) {
         theme = t;
@@ -209,6 +296,21 @@
         </div>
     </div>
 
+    <!-- Trash Bin -->
+    <div class="settings-section">
+        <p class="settings-section-title">Trash Bin (ถังขยะ)</p>
+        <button type="button" class="settings-row" onclick={toggleTrashView} style="width: 100%; border: none; background: transparent; text-align: left; padding: 12px 0; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="settings-row-icon" style="background-color: #ef444430">🗑️</div>
+                <span class="settings-row-label" style="color: var(--text-primary);">ถังขยะรายการที่ถูกลบ</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+                <span class="settings-row-value" style="color: var(--text-secondary); margin-right: 4px;">เปิดถังขยะ</span>
+                <ChevronRight size={16} />
+            </div>
+        </button>
+    </div>
+
     <!-- About -->
     <div class="settings-section">
         <p class="settings-section-title">About</p>
@@ -225,6 +327,87 @@
     </div>
 
 </div>
+
+{#if showTrash}
+    <div class="trash-overlay">
+        <div class="trash-header">
+            <button type="button" class="back-btn" onclick={toggleTrashView}>
+                <ArrowLeft size={20} />
+            </button>
+            <h2>ถังขยะ (เก็บ 30 วัน)</h2>
+            {#if trashedCategories.length > 0 || trashedActivities.length > 0}
+                <button type="button" class="empty-btn" onclick={emptyTrash}>
+                    <Trash2 size={16} style="margin-right: 4px;" /> ล้างทั้งหมด
+                </button>
+            {/if}
+        </div>
+
+        <div class="trash-content">
+            {#if isLoadingTrash}
+                <div style="display: flex; justify-content: center; align-items: center; height: 200px;">
+                    <div class="spinner"></div>
+                </div>
+            {:else if trashedCategories.length === 0 && trashedActivities.length === 0}
+                <div class="empty-trash-view">
+                    <span style="font-size: 48px;">🗑️</span>
+                    <p style="margin-top: 12px; font-weight: 600; color: var(--text-secondary);">ไม่มีรายการในถังขยะ</p>
+                </div>
+            {:else}
+                <!-- Trashed Groups -->
+                {#if trashedCategories.length > 0}
+                    <div class="trash-group-section">
+                        <h3 style="color: var(--text-secondary);">กลุ่ม ({trashedCategories.length})</h3>
+                        {#each trashedCategories as cat}
+                            <div class="trash-item-row">
+                                <div class="item-info">
+                                    <span class="item-icon">{cat.icon || '📁'}</span>
+                                    <div class="item-meta">
+                                        <span class="item-name">{cat.name}</span>
+                                        <span class="item-days">เหลือ {getDaysRemaining(cat.deleted_at)} วัน</span>
+                                    </div>
+                                </div>
+                                <div class="item-actions">
+                                    <button type="button" class="restore-action" onclick={() => restoreItem(cat.id, 'group')} title="กู้คืน">
+                                        <RotateCcw size={16} />
+                                    </button>
+                                    <button type="button" class="delete-action" onclick={() => purgeItem(cat.id, 'group')} title="ลบถาวร">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+
+                <!-- Trashed Activities -->
+                {#if trashedActivities.length > 0}
+                    <div class="trash-group-section" style="margin-top: 16px;">
+                        <h3 style="color: var(--text-secondary);">กิจกรรม ({trashedActivities.length})</h3>
+                        {#each trashedActivities as act}
+                            <div class="trash-item-row">
+                                <div class="item-info">
+                                    <span class="item-icon">{act.icon || '📌'}</span>
+                                    <div class="item-meta">
+                                        <span class="item-name">{act.name}</span>
+                                        <span class="item-days">เหลือ {getDaysRemaining(act.deleted_at)} วัน</span>
+                                    </div>
+                                </div>
+                                <div class="item-actions">
+                                    <button type="button" class="restore-action" onclick={() => restoreItem(act.id, 'activity')} title="กู้คืน">
+                                        <RotateCcw size={16} />
+                                    </button>
+                                    <button type="button" class="delete-action" onclick={() => purgeItem(act.id, 'activity')} title="ลบถาวร">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+            {/if}
+        </div>
+    </div>
+{/if}
 
 <style>
     .status-ok {
@@ -382,5 +565,142 @@
     .del-tag-btn:hover {
         background: #fca5a5;
         color: #b91c1c;
+    }
+
+    /* Trash Overlay styling */
+    .trash-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--bg-primary, #ffffff);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+    }
+    :global(html.dark-mode) .trash-overlay {
+        background: #121212;
+    }
+    .trash-header {
+        display: flex;
+        align-items: center;
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+        gap: 12px;
+    }
+    .trash-header h2 {
+        flex: 1;
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0;
+        color: var(--text-primary);
+    }
+    .back-btn {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: var(--text-primary);
+        padding: 4px;
+        display: flex;
+        align-items: center;
+    }
+    .empty-btn {
+        background: #fee2e2;
+        border: 1px solid #fecaca;
+        color: #ef4444;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+    }
+    .empty-btn:hover {
+        background: #fca5a5;
+    }
+    .trash-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+    }
+    .empty-trash-view {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 300px;
+    }
+    .trash-group-section h3 {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    .trash-item-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        margin-bottom: 8px;
+    }
+    :global(html.dark-mode) .trash-item-row {
+        background: #1e1e1e;
+        border-color: #2d2d2d;
+    }
+    .item-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .item-icon {
+        font-size: 20px;
+    }
+    .item-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .item-name {
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--text-primary);
+    }
+    .item-days {
+        font-size: 11px;
+        color: #ef4444;
+        font-weight: 500;
+    }
+    .item-actions {
+        display: flex;
+        gap: 8px;
+    }
+    .restore-action, .delete-action {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        border: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .restore-action {
+        background: #e0f2fe;
+        color: #0284c7;
+    }
+    .restore-action:hover {
+        background: #bae6fd;
+    }
+    .delete-action {
+        background: #fee2e2;
+        color: #dc2626;
+    }
+    .delete-action:hover {
+        background: #fecaca;
     }
 </style>

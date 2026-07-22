@@ -159,12 +159,12 @@
         };
     }));
 
-    async function fetchData() {
-        isLoading = true;
+    async function fetchData(silent = false) {
+        if (!silent) isLoading = true;
         try {
             const [{ data: acts }, { data: cats }, { data: lg }] = await Promise.all([
-                supabase.from('activities').select('*, categories(*)').order('created_at', { ascending: true }),
-                supabase.from('categories').select('*').order('name', { ascending: true }),
+                supabase.from('activities').select('*, categories(*)').is('deleted_at', null).order('created_at', { ascending: true }),
+                supabase.from('categories').select('*').is('deleted_at', null).order('name', { ascending: true }),
                 supabase.from('activity_logs').select('*').gte('date', dates[4])
             ]);
 
@@ -174,7 +174,7 @@
         } catch (e) {
             console.error(e);
         } finally {
-            isLoading = false;
+            if (!silent) isLoading = false;
         }
     }
 
@@ -290,7 +290,7 @@
 
             resetActivityForm();
             showAddModal = false;
-            await fetchData();
+            await fetchData(true);
         } catch (err: any) {
             console.error(err);
             errorMessage = err?.message || 'เกิดข้อผิดพลาดในการบันทึก';
@@ -301,8 +301,9 @@
 
     async function deleteActivity(id: string) {
         if (!confirm('คุณต้องการลบกิจกรรมนี้ใช่หรือไม่?')) return;
-        await supabase.from('activities').delete().eq('id', id);
-        fetchData();
+        const nowStr = new Date().toISOString();
+        await supabase.from('activities').update({ deleted_at: nowStr }).eq('id', id);
+        await fetchData(true);
     }
 
     function editActivity(act: any) {
@@ -346,7 +347,7 @@
 
         resetCategoryForm();
         showCategoryModal = false;
-        await fetchData();
+        await fetchData(true);
     }
 
     function editCategory(cat: any) {
@@ -357,9 +358,14 @@
     }
 
     async function deleteCategory(id: string) {
-        if (!confirm('คุณต้องการลบกลุ่มนี้ใช่หรือไม่? (กิจกรรมในกลุ่มนี้จะถูกเปลี่ยนเป็นไม่มีกลุ่ม)')) return;
-        await supabase.from('categories').delete().eq('id', id);
-        fetchData();
+        if (!confirm('คุณต้องการลบกลุ่มนี้ใช่หรือไม่? (กิจกรรมและกลุ่มย่อยในกลุ่มนี้จะถูกย้ายไปที่ถังขยะด้วย)')) return;
+        const nowStr = new Date().toISOString();
+        // Soft-delete category
+        await supabase.from('categories').update({ deleted_at: nowStr }).eq('id', id);
+        // Soft-delete subcategories and activities in this group
+        await supabase.from('categories').update({ deleted_at: nowStr }).eq('parent_id', id);
+        await supabase.from('activities').update({ deleted_at: nowStr }).eq('category_id', id);
+        await fetchData(true);
     }
 
     function resetActivityForm() {

@@ -211,7 +211,8 @@
 
     async function deleteActivity() {
         if (!confirm('คุณต้องการลบกิจกรรมนี้ใช่หรือไม่?')) return;
-        await supabase.from('activities').delete().eq('id', activityId);
+        const nowStr = new Date().toISOString();
+        await supabase.from('activities').update({ deleted_at: nowStr }).eq('id', activityId);
         goto('/');
     }
 

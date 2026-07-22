@@ -1,10 +1,38 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { afterNavigate, goto } from '$app/navigation';
 	import favicon from '$lib/assets/favicon.svg';
 	import BottomNav from '$lib/components/BottomNav.svelte';
 
 	let { children } = $props();
+	let pageContentEl = $state<HTMLDivElement | null>(null);
+
+	// Track scrolling to store position
+	function handleScroll() {
+		if (pageContentEl) {
+			const path = window.location.pathname;
+			localStorage.setItem(`ohdiary_scroll_${path}`, pageContentEl.scrollTop.toString());
+		}
+	}
+
+	afterNavigate(({ to }) => {
+		if (to) {
+			const path = to.url.pathname;
+			localStorage.setItem('ohdiary_last_path', path);
+
+			const savedScroll = localStorage.getItem(`ohdiary_scroll_${path}`);
+			if (savedScroll && pageContentEl) {
+				setTimeout(() => {
+					if (pageContentEl) {
+						pageContentEl.scrollTop = parseInt(savedScroll, 10);
+					}
+				}, 60);
+			} else if (pageContentEl) {
+				pageContentEl.scrollTop = 0;
+			}
+		}
+	});
 
 	onMount(() => {
 		const theme = localStorage.getItem('ohdiary_theme') || 'system';
@@ -16,6 +44,23 @@
 			root.classList.add('light-mode');
 			root.classList.remove('dark-mode');
 		}
+
+		// Restore last visited route if opening on root '/'
+		const currentPath = window.location.pathname;
+		const lastPath = localStorage.getItem('ohdiary_last_path');
+		if (lastPath && lastPath !== currentPath && currentPath === '/') {
+			goto(lastPath);
+		} else {
+			// Restore scroll position on initial load
+			const savedScroll = localStorage.getItem(`ohdiary_scroll_${currentPath}`);
+			if (savedScroll && pageContentEl) {
+				setTimeout(() => {
+					if (pageContentEl) {
+						pageContentEl.scrollTop = parseInt(savedScroll, 10);
+					}
+				}, 120);
+			}
+		}
 	});
 </script>
 
@@ -25,7 +70,7 @@
 </svelte:head>
 
 <div class="app-shell">
-	<div class="page-content">
+	<div class="page-content" bind:this={pageContentEl} onscroll={handleScroll}>
 		{@render children()}
 	</div>
 	<BottomNav />

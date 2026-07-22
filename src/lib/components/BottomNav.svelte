@@ -1,14 +1,15 @@
 <script lang="ts">
     import { page } from "$app/stores";
     import { goto } from "$app/navigation";
-    import { Clock, BookOpen, History, Settings } from "@lucide/svelte";
+    import { Clock, BookOpen, History, Settings, Target } from "@lucide/svelte";
 
     const tabs = [
-        { href: "/", label: "Habits", Icon: BookOpen },
-        { href: "/timer", label: "Timer", Icon: Clock },
-        { href: "/history", label: "History", Icon: History },
-        { href: "/settings", label: "Settings", Icon: Settings },
-    ];
+    { href: "/timer", label: "Timer", Icon: Clock },
+    { href: "/history", label: "History", Icon: History },
+    { href: "/goals", label: "Goals", Icon: Target },
+    { href: "/activities", label: "Types", Icon: BookOpen },
+    { href: "/settings", label: "Settings", Icon: Settings },
+];
 
     let activePath = $derived($page.url.pathname);
 
