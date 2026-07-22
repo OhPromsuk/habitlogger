@@ -500,11 +500,6 @@
                     <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
                         {act.name}
                     </span>
-                    {#if isRunning}
-                        <span class="running-indicator-badge">
-                            RUNNING ({instanceCount})
-                        </span>
-                    {/if}
                 </button>
             {/each}
         </div>
