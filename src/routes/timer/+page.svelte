@@ -7,12 +7,45 @@
     import SessionDetailModal from "$lib/components/SessionDetailModal.svelte";
 
     let activities = $state<any[]>([]);
+    let categories = $state<any[]>([]);
+    let categoryTree = $state<any[]>([]);
     let isLoading = $state(true);
+
+    // Category type helper
+    interface Category {
+        id: string;
+        name: string;
+        icon: string;
+        color_hsl: string;
+        parent_id: string | null;
+        children?: Category[];
+    }
+
+    function buildCategoryTree(cats: Category[]): Category[] {
+        const map = new Map<string, Category>();
+        const roots: Category[] = [];
+        cats.forEach(c => {
+            const copy: Category = { ...c, children: [] };
+            map.set(c.id, copy);
+        });
+        map.forEach(c => {
+            if (c.parent_id) {
+                const parent = map.get(c.parent_id);
+                if (parent) parent.children?.push(c);
+            } else {
+                roots.push(c);
+            }
+        });
+        return roots;
+    }
 
     // Multi-Select Mode States
     let isSelectMode = $state(false);
     let selectedInstanceIds = $state<Set<string>>(new Set());
     let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Ungrouped activities helper
+    const rootActs = $derived(activities.filter(a => !a.category_id));
 
     // Modal States
     let showManualLogModal = $state(false);
@@ -95,31 +128,34 @@
     async function fetchActivities() {
         isLoading = true;
         try {
-            const { data, error } = await supabase
-                .from('activities')
-                .select('*')
-                .order('created_at', { ascending: true });
-            
-            if (error) console.error("Fetch activities error:", error);
-            activities = (data && data.length > 0) ? data : [
-                { id: 'act_sleep', name: 'นอนหลับ', icon: '😴', color_hsl: '220, 80%, 60%' },
-                { id: 'act_meditate', name: 'นั่งสมาธิ', icon: '🧘‍♀️', color_hsl: '200, 85%, 50%' },
-                { id: 'act_read', name: 'อ่านหนังสือ', icon: '📚', color_hsl: '145, 65%, 45%' },
-                { id: 'act_work', name: 'ทำงาน', icon: '💻', color_hsl: '25, 95%, 53%' }
-            ];
-            
+            const [{ data: acts, error: actsErr }, { data: cats, error: catsErr }] = await Promise.all([
+                supabase.from('activities')
+                    .select('*')
+                    .is('deleted_at', null)
+                    .order('sort_order', { ascending: true })
+                    .order('created_at', { ascending: true }),
+                supabase.from('categories')
+                    .select('*')
+                    .is('deleted_at', null)
+                    .order('sort_order', { ascending: true })
+                    .order('name', { ascending: true })
+            ]);
+
+            if (actsErr) console.error("Fetch activities error:", actsErr);
+            if (catsErr) console.error("Fetch categories error:", catsErr);
+
+            activities = acts || [];
+            categories = cats || [];
+            categoryTree = buildCategoryTree(categories as Category[]);
+
             if (activities.length > 0 && !manualActivityId) {
                 manualActivityId = activities[0].id;
             }
         } catch (e) {
             console.error("Fetch activities catch error:", e);
-            // Fallback default activities if network fails
-            activities = [
-                { id: 'act_sleep', name: 'นอนหลับ', icon: '😴', color_hsl: '220, 80%, 60%' },
-                { id: 'act_meditate', name: 'นั่งสมาธิ', icon: '🧘‍♀️', color_hsl: '200, 85%, 50%' },
-                { id: 'act_read', name: 'อ่านหนังสือ', icon: '📚', color_hsl: '145, 65%, 45%' },
-                { id: 'act_work', name: 'ทำงาน', icon: '💻', color_hsl: '25, 95%, 53%' }
-            ];
+            activities = [];
+            categories = [];
+            categoryTree = [];
         } finally {
             isLoading = false;
         }
@@ -482,25 +518,106 @@
     {#if isLoading}
         <div class="spinner" style="margin-top: 40px;"></div>
     {:else}
-        <div class="activity-grid">
-            {#each activities as act}
-                {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
-                {@const instanceCount = runningInstances.length}
-                {@const isRunning = instanceCount > 0}
-                {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
+        <div class="grouped-activities">
+            <!-- 1. กิจกรรมที่ไม่ได้จัดกลุ่ม (Ungrouped/Root Activities) -->
+            {#if rootActs.length > 0}
+                <div class="category-block">
+                    <div class="activity-grid">
+                        {#each rootActs as act}
+                            {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
+                            {@const instanceCount = runningInstances.length}
+                            {@const isRunning = instanceCount > 0}
+                            {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
 
-                <button
-                    type="button"
-                    class="activity-grid-card {isRunning ? 'running' : ''}"
-                    onclick={() => handleActivityClick(act)}
-                >
-                    <div class="activity-icon-circle" style="background-color: {color}">
-                        <span class="act-emoji">{act.icon || '📌'}</span>
+                            <button
+                                type="button"
+                                class="activity-grid-card {isRunning ? 'running' : ''}"
+                                onclick={() => handleActivityClick(act)}
+                            >
+                                <div class="activity-icon-circle" style="background-color: {color}">
+                                    <span class="act-emoji">{act.icon || '📌'}</span>
+                                </div>
+                                <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
+                                    {act.name}
+                                </span>
+                            </button>
+                        {/each}
                     </div>
-                    <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
-                        {act.name}
-                    </span>
-                </button>
+                </div>
+            {/if}
+
+            <!-- 2. กิจกรรมที่จัดกลุ่มแยกตามหมวดหมู่ (Categories Tree) -->
+            {#each categoryTree as cat}
+                {@const catActs = activities.filter(a => a.category_id === cat.id)}
+                {#if catActs.length > 0 || (cat.children && cat.children.length > 0)}
+                    <div class="category-block">
+                        <div class="category-title" style="color: hsl({cat.color_hsl})">
+                            <span class="category-title-icon">{cat.icon || '📁'}</span>
+                            <span class="category-title-text">{cat.name}</span>
+                        </div>
+                        
+                        <!-- กิจกรรมภายในกลุ่มหลักนี้ -->
+                        {#if catActs.length > 0}
+                            <div class="activity-grid">
+                                {#each catActs as act}
+                                    {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
+                                    {@const instanceCount = runningInstances.length}
+                                    {@const isRunning = instanceCount > 0}
+                                    {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
+
+                                    <button
+                                        type="button"
+                                        class="activity-grid-card {isRunning ? 'running' : ''}"
+                                        onclick={() => handleActivityClick(act)}
+                                    >
+                                        <div class="activity-icon-circle" style="background-color: {color}">
+                                            <span class="act-emoji">{act.icon || '📌'}</span>
+                                        </div>
+                                        <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
+                                            {act.name}
+                                        </span>
+                                    </button>
+                                {/each}
+                            </div>
+                        {/if}
+
+                        <!-- จัดการกลุ่มย่อย (Sub-categories) ภายใต้กลุ่มหลักนี้ -->
+                        {#if cat.children && cat.children.length > 0}
+                            {#each cat.children as subCat}
+                                {@const subActs = activities.filter(a => a.category_id === subCat.id)}
+                                {#if subActs.length > 0}
+                                    <div class="sub-category-block">
+                                        <div class="sub-category-title" style="color: hsl({subCat.color_hsl})">
+                                            <span class="category-title-icon">{subCat.icon || '📁'}</span>
+                                            <span class="category-title-text">{subCat.name}</span>
+                                        </div>
+                                        <div class="activity-grid">
+                                            {#each subActs as act}
+                                                {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
+                                                {@const instanceCount = runningInstances.length}
+                                                {@const isRunning = instanceCount > 0}
+                                                {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
+
+                                                <button
+                                                    type="button"
+                                                    class="activity-grid-card {isRunning ? 'running' : ''}"
+                                                    onclick={() => handleActivityClick(act)}
+                                                >
+                                                    <div class="activity-icon-circle" style="background-color: {color}">
+                                                        <span class="act-emoji">{act.icon || '📌'}</span>
+                                                    </div>
+                                                    <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
+                                                        {act.name}
+                                                    </span>
+                                                </button>
+                                            {/each}
+                                        </div>
+                                    </div>
+                                {/if}
+                            {/each}
+                        {/if}
+                    </div>
+                {/if}
             {/each}
         </div>
     {/if}
@@ -1318,11 +1435,58 @@
         color: #4a90d9;
     }
 
-    /* Activities Grid Responsive 4-6 items per row */
+    /* Activities Grid Fixed 4 items per row */
     .activity-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+        grid-template-columns: repeat(4, 1fr);
         gap: 12px;
+    }
+
+    .grouped-activities {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+
+    .category-block {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .category-title {
+        font-size: 13px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--divider-color);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .category-title-icon {
+        font-size: 14px;
+    }
+
+    .sub-category-block {
+        margin-left: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border-left: 2px dashed var(--border-color);
+        padding-left: 12px;
+        margin-top: 8px;
+    }
+
+    .sub-category-title {
+        font-size: 11px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 4px;
     }
 
     .activity-grid-card {

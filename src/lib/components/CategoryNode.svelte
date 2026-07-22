@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Trash2, ChevronDown, ChevronRight, Menu } from '@lucide/svelte';
+    import CategoryNode from './CategoryNode.svelte';
 
     export interface Category {
         id: string;
@@ -164,7 +165,7 @@
             ondrop={ondrop}
         />
     {/each}
-    {#each activities.filter(a => a.category_id === node.id) as act}
+    {#each activities.filter((a: any) => a.category_id === node.id) as act}
         {@const actColor = `hsl(${act.color_hsl})`}
         <div 
             class="type-item {selectedIds.includes(act.id) ? 'selected-sorting' : ''} {isReorderMode ? 'draggable-sorting' : ''} {hoveredActivityId === act.id ? 'drag-over-sibling' : ''}" 
