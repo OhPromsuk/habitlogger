@@ -10,6 +10,7 @@
     let categories = $state<any[]>([]);
     let categoryTree = $state<any[]>([]);
     let isLoading = $state(true);
+    let selectedCategory = $state<any>(null);
 
     // Category type helper
     interface Category {
@@ -118,6 +119,14 @@
     // Fetch activities when component mounts
     onMount(() => {
         fetchActivities();
+
+        const handleSync = () => {
+            fetchActivities();
+        };
+        window.addEventListener('ohdiary_sync_logs', handleSync);
+        return () => {
+            window.removeEventListener('ohdiary_sync_logs', handleSync);
+        };
     });
 
     // Derived active timers sorted so running timers (isPaused: false) stay at top, paused at bottom
@@ -514,113 +523,73 @@
         </div>
     {/if}
 
-    <!-- Activities Grid -->
-    {#if isLoading}
-        <div class="spinner" style="margin-top: 40px;"></div>
-    {:else}
-        <div class="grouped-activities">
-            <!-- 1. กิจกรรมที่ไม่ได้จัดกลุ่ม (Ungrouped/Root Activities) -->
-            {#if rootActs.length > 0}
-                <div class="category-block">
-                    <div class="activity-grid">
-                        {#each rootActs as act}
-                            {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
-                            {@const instanceCount = runningInstances.length}
-                            {@const isRunning = instanceCount > 0}
-                            {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
-
-                            <button
-                                type="button"
-                                class="activity-grid-card {isRunning ? 'running' : ''}"
-                                onclick={() => handleActivityClick(act)}
-                            >
-                                <div class="activity-icon-circle" style="background-color: {color}">
-                                    <span class="act-emoji">{act.icon || '📌'}</span>
-                                </div>
-                                <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
-                                    {act.name}
-                                </span>
-                            </button>
-                        {/each}
-                    </div>
-                </div>
-            {/if}
-
-            <!-- 2. กิจกรรมที่จัดกลุ่มแยกตามหมวดหมู่ (Categories Tree) -->
-            {#each categoryTree as cat}
-                {@const catActs = activities.filter(a => a.category_id === cat.id)}
-                {#if catActs.length > 0 || (cat.children && cat.children.length > 0)}
-                    <div class="category-block">
-                        <div class="category-title" style="color: hsl({cat.color_hsl})">
-                            <span class="category-title-icon">{cat.icon || '📁'}</span>
-                            <span class="category-title-text">{cat.name}</span>
+<!-- Activities Grid -->
+{#if isLoading}
+    <div class="spinner" style="margin-top: 40px;"></div>
+{:else}
+    {#if !selectedCategory}
+        <!-- Category Grid -->
+        <div class="category-grid">
+            {#each categories as cat}
+                {@const catCount = activities.filter(a => a.category_id === cat.id).length}
+                {#if catCount > 0}
+                    <button type="button" class="category-card" onclick={() => selectedCategory = cat} style="color: hsl({cat.color_hsl})">
+                        <div class="activity-icon-circle" style="background-color: hsl({cat.color_hsl || '210, 85%, 55%'})">
+                            <span class="act-emoji">{cat.icon || '📁'}</span>
                         </div>
-                        
-                        <!-- กิจกรรมภายในกลุ่มหลักนี้ -->
-                        {#if catActs.length > 0}
-                            <div class="activity-grid">
-                                {#each catActs as act}
-                                    {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
-                                    {@const instanceCount = runningInstances.length}
-                                    {@const isRunning = instanceCount > 0}
-                                    {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
-
-                                    <button
-                                        type="button"
-                                        class="activity-grid-card {isRunning ? 'running' : ''}"
-                                        onclick={() => handleActivityClick(act)}
-                                    >
-                                        <div class="activity-icon-circle" style="background-color: {color}">
-                                            <span class="act-emoji">{act.icon || '📌'}</span>
-                                        </div>
-                                        <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
-                                            {act.name}
-                                        </span>
-                                    </button>
-                                {/each}
-                            </div>
-                        {/if}
-
-                        <!-- จัดการกลุ่มย่อย (Sub-categories) ภายใต้กลุ่มหลักนี้ -->
-                        {#if cat.children && cat.children.length > 0}
-                            {#each cat.children as subCat}
-                                {@const subActs = activities.filter(a => a.category_id === subCat.id)}
-                                {#if subActs.length > 0}
-                                    <div class="sub-category-block">
-                                        <div class="sub-category-title" style="color: hsl({subCat.color_hsl})">
-                                            <span class="category-title-icon">{subCat.icon || '📁'}</span>
-                                            <span class="category-title-text">{subCat.name}</span>
-                                        </div>
-                                        <div class="activity-grid">
-                                            {#each subActs as act}
-                                                {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
-                                                {@const instanceCount = runningInstances.length}
-                                                {@const isRunning = instanceCount > 0}
-                                                {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
-
-                                                <button
-                                                    type="button"
-                                                    class="activity-grid-card {isRunning ? 'running' : ''}"
-                                                    onclick={() => handleActivityClick(act)}
-                                                >
-                                                    <div class="activity-icon-circle" style="background-color: {color}">
-                                                        <span class="act-emoji">{act.icon || '📌'}</span>
-                                                    </div>
-                                                    <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
-                                                        {act.name}
-                                                    </span>
-                                                </button>
-                                            {/each}
-                                        </div>
-                                    </div>
-                                {/if}
-                            {/each}
-                        {/if}
-                    </div>
+                        <span class="category-label">{cat.name}</span>
+                        <span class="category-count">{catCount}</span>
+                    </button>
                 {/if}
+            {/each}
+            
+            {#each rootActs as act}
+                {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
+                {@const instanceCount = runningInstances.length}
+                {@const isRunning = instanceCount > 0}
+                {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
+
+                <button
+                    type="button"
+                    class="activity-grid-card {isRunning ? 'running' : ''}"
+                    onclick={() => handleActivityClick(act)}
+                >
+                    <div class="activity-icon-circle" style="background-color: {color}">
+                        <span class="act-emoji">{act.icon || '📌'}</span>
+                    </div>
+                    <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
+                        {act.name}
+                    </span>
+                </button>
+            {/each}
+        </div>
+    {:else}
+        <!-- Back button -->
+        <button type="button" class="back-btn" onclick={() => selectedCategory = null}>← กลับ</button>
+        <!-- Activities for selected category -->
+        {@const acts = activities.filter(a => a.category_id === selectedCategory.id)}
+        <div class="activity-grid">
+            {#each acts as act}
+                {@const runningInstances = timerEngine.activeTimers.filter(t => t.activityId === act.id)}
+                {@const instanceCount = runningInstances.length}
+                {@const isRunning = instanceCount > 0}
+                {@const color = `hsl(${act.color_hsl || '210, 85%, 55%'})`}
+                <button
+                    type="button"
+                    class="activity-grid-card {isRunning ? 'running' : ''}"
+                    onclick={() => handleActivityClick(act)}
+                >
+                    <div class="activity-icon-circle" style="background-color: {color}">
+                        <span class="act-emoji">{act.icon || '📌'}</span>
+                    </div>
+                    <span class="activity-grid-label" style="color: {isRunning ? color : 'var(--text-primary)'}">
+                        {act.name}
+                    </span>
+                </button>
             {/each}
         </div>
     {/if}
+{/if}
 
     <!-- Floating Action Buttons wrapper (Hidden when any modal or select mode is open) -->
     {#if !selectedActiveSession && !showManualLogModal && !showSelectActivityModal && !isSelectMode}
@@ -1436,10 +1405,80 @@
     }
 
     /* Activities Grid Fixed 4 items per row */
+    .category-grid,
     .activity-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 12px;
+    }
+
+    .category-card {
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 12px 6px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        position: relative;
+        width: 100%;
+    }
+
+    .category-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(255,255,255,0.2);
+    }
+
+    .category-card:active {
+        transform: scale(0.95);
+    }
+
+    .category-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        width: 100%;
+    }
+
+    .category-count {
+        position: absolute;
+        top: 6px;
+        right: 12px;
+        background-color: rgba(255, 255, 255, 0.15);
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-weight: bold;
+        padding: 2px 6px;
+        border-radius: 10px;
+        min-width: 16px;
+        text-align: center;
+    }
+
+    .back-btn {
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 16px;
+        border-radius: var(--radius-md);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 12px;
+        transition: background-color 0.15s;
+    }
+
+    .back-btn:hover {
+        background-color: var(--bg-tertiary);
     }
 
     .grouped-activities {

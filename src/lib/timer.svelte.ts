@@ -20,12 +20,24 @@ export interface ActiveTimer {
     intervals: TimerInterval[];
 }
 
+interface OfflineLog {
+    id: string;
+    activityId: string;
+    startTime: string;
+    endTime: string;
+    durationSeconds: number;
+    notes: string;
+}
+
 class TimerEngine {
     activeTimers = $state<ActiveTimer[]>([]);
     private intervalId: ReturnType<typeof setInterval> | null = null;
+    private offlineQueue: OfflineLog[] = [];
+    private realtimeChannel: any = null;
 
     constructor() {
         if (typeof window !== 'undefined') {
+            // Load Active Timers
             const saved = localStorage.getItem('ohdiary_active_timers_instances');
             if (saved) {
                 try {
@@ -69,7 +81,47 @@ class TimerEngine {
                     console.error('Error loading multi-instance timer state', e);
                 }
             }
+
+            // Load Offline Sync Queue
+            const savedQueue = localStorage.getItem('ohdiary_offline_logs_queue');
+            if (savedQueue) {
+                try {
+                    this.offlineQueue = JSON.parse(savedQueue);
+                } catch (e) {
+                    console.error('Error loading offline queue', e);
+                }
+            }
+
+            // Listen to network status change
+            window.addEventListener('online', () => {
+                this.syncOfflineLogs();
+            });
+
+            // Trigger sync on boot if online
+            if (navigator.onLine) {
+                this.syncOfflineLogs();
+            }
+
+            // Setup Supabase Realtime for activity_logs to auto-sync history across devices
+            this.setupRealtimeSync();
         }
+    }
+
+    private setupRealtimeSync() {
+        this.realtimeChannel = supabase
+            .channel('public:activity_logs')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'activity_logs' },
+                (payload) => {
+                    console.log('Realtime change received:', payload);
+                    // Dispatch custom event to notify +page.svelte (or other list views) to reload logs
+                    if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('ohdiary_sync_logs'));
+                    }
+                }
+            )
+            .subscribe();
     }
 
     start(activityId: string, activityName: string, colorHsl = '220, 80%, 60%', icon = '⏱', comment = '') {
@@ -216,42 +268,99 @@ class TimerEngine {
 
     private async saveIntervalLog(activityId: string, startTime: Date, endTime: Date, durationSecs: number, comment: string) {
         if (durationSecs <= 0) return;
-        try {
-            // Get local date string YYYY-MM-DD
-            const year = endTime.getFullYear();
-            const month = String(endTime.getMonth() + 1).padStart(2, '0');
-            const day = String(endTime.getDate()).padStart(2, '0');
-            const today = `${year}-${month}-${day}`;
 
-            // If using mockup activity ID (non-UUID format), fetch actual UUID or bypass
-            let targetActivityId = activityId;
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (!uuidRegex.test(targetActivityId)) {
-                // Try fetching first real activity from Supabase if mockup id
-                const { data } = await supabase.from('activities').select('id').limit(1);
-                if (data && data.length > 0) {
-                    targetActivityId = data[0].id;
-                } else {
-                    console.warn('Cannot insert log: No valid UUID activity found in database.');
-                    return;
+        // Get local date string YYYY-MM-DD
+        const year = endTime.getFullYear();
+        const month = String(endTime.getMonth() + 1).padStart(2, '0');
+        const day = String(endTime.getDate()).padStart(2, '0');
+        const today = `${year}-${month}-${day}`;
+
+        const offlineLog: OfflineLog = {
+            id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            activityId,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            durationSeconds: durationSecs,
+            notes: comment
+        };
+
+        // UI Optimistic update: Dispatch local sync event immediately so logs view can show offline items if needed
+        this.offlineQueue.push(offlineLog);
+        this.saveQueueToLocalStorage();
+
+        // Dispatch local event to update local list view immediately
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('ohdiary_sync_logs'));
+        }
+
+        // Try to sync queue
+        await this.syncOfflineLogs();
+    }
+
+    // Save offline queue to localstorage
+    private saveQueueToLocalStorage() {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('ohdiary_offline_logs_queue', JSON.stringify(this.offlineQueue));
+        }
+    }
+
+    // Read local offline logs to display in history list
+    getOfflineQueueLogs() {
+        return this.offlineQueue;
+    }
+
+    // Sync all pending logs to Supabase
+    async syncOfflineLogs() {
+        if (this.offlineQueue.length === 0) return;
+
+        // Clone queue and clean
+        const queueToProcess = [...this.offlineQueue];
+
+        for (const log of queueToProcess) {
+            try {
+                let targetActivityId = log.activityId;
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (!uuidRegex.test(targetActivityId)) {
+                    const { data } = await supabase.from('activities').select('id').limit(1);
+                    if (data && data.length > 0) {
+                        targetActivityId = data[0].id;
+                    } else {
+                        console.warn('Cannot insert log: No valid UUID activity found.');
+                        continue;
+                    }
                 }
-            }
 
-            const { error } = await supabase.from('activity_logs').insert([{
-                activity_id: targetActivityId,
-                date: today,
-                start_time: startTime.toISOString(),
-                end_time: endTime.toISOString(),
-                duration_seconds: durationSecs,
-                notes: comment.trim() || null,
-                is_completed: true
-            }]);
+                const end = new Date(log.endTime);
+                const year = end.getFullYear();
+                const month = String(end.getMonth() + 1).padStart(2, '0');
+                const day = String(end.getDate()).padStart(2, '0');
+                const today = `${year}-${month}-${day}`;
 
-            if (error) {
-                console.error('Supabase activity_log insert error:', error);
+                const { error } = await supabase.from('activity_logs').insert([{
+                    activity_id: targetActivityId,
+                    date: today,
+                    start_time: log.startTime,
+                    end_time: log.endTime,
+                    duration_seconds: log.durationSeconds,
+                    notes: log.notes.trim() || null,
+                    is_completed: true
+                }]);
+
+                if (!error) {
+                    // Success, remove from queue
+                    this.offlineQueue = this.offlineQueue.filter(q => q.id !== log.id);
+                    this.saveQueueToLocalStorage();
+                } else {
+                    console.error('Error syncing log to Supabase:', error);
+                }
+            } catch (err) {
+                console.error('Failed to sync log', err);
             }
-        } catch (e) {
-            console.error('Failed to save interval log segment', e);
+        }
+
+        // Notify client view to reload
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('ohdiary_sync_logs'));
         }
     }
 
@@ -306,3 +415,4 @@ class TimerEngine {
 }
 
 export const timerEngine = new TimerEngine();
+

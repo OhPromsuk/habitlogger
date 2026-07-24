@@ -3,6 +3,7 @@
     import { Plus, Settings2, Pencil, Trash2, Check, X, Clock, Hash } from '@lucide/svelte';
     import { supabase } from '$lib/supabase';
     import GoalForm from '$lib/components/GoalForm.svelte';
+    import { timerEngine } from '$lib/timer.svelte';
 
     // ─── Types ────────────────────────────────────────────────
     interface Goal {
@@ -185,6 +186,16 @@
                 total += agg.count;
             }
         });
+
+        // Add active/paused timers if they are for "today"
+        const todayStr = new Date().toLocaleDateString('sv'); // sv local format is YYYY-MM-DD
+        if (date === todayStr && goal.goal_type === 'timer') {
+            const activeSeconds = timerEngine.activeTimers
+                .filter(t => actIds.includes(t.activityId))
+                .reduce((sum, t) => sum + t.elapsedSeconds, 0);
+            total += activeSeconds;
+        }
+
         return total;
     }
 

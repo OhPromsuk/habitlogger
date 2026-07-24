@@ -389,7 +389,18 @@
         isCatEmojiExpanded = false;
     }
 
-    onMount(fetchData);
+    onMount(() => {
+        fetchData();
+
+        // Listen for sync event to refresh the UI immediately
+        const handleSync = () => {
+            fetchData(true);
+        };
+        window.addEventListener('ohdiary_sync_logs', handleSync);
+        return () => {
+            window.removeEventListener('ohdiary_sync_logs', handleSync);
+        };
+    });
 </script>
 
 <!-- Sticky Header -->

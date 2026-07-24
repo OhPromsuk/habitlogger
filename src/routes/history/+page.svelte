@@ -95,7 +95,39 @@
             .lte('date', endStr)
             .order('date', { ascending: false })
             .order('created_at', { ascending: false });
-        if (!error) logs = data || [];
+
+        let loadedLogs = data || [];
+
+        // Mix in offline queue logs that belong to the active date filter
+        const offlineQueue = timerEngine.getOfflineQueueLogs();
+        const localOfflineLogs = offlineQueue.filter(item => {
+            const itemDateStr = item.startTime.substring(0, 10);
+            return itemDateStr >= startStr && itemDateStr <= endStr;
+        }).map(item => {
+            const activity = activities.find(a => a.id === item.activityId) || {
+                name: 'กิจกรรมออฟไลน์',
+                color_hsl: '0, 0%, 50%',
+                icon: '⏱'
+            };
+            return {
+                id: item.id,
+                activity_id: item.activityId,
+                date: item.startTime.substring(0, 10),
+                start_time: item.startTime,
+                end_time: item.endTime,
+                duration_seconds: item.durationSeconds,
+                notes: item.notes,
+                is_completed: true,
+                is_offline_pending: true, // Tag to visually show it's syncing
+                activities: {
+                    name: activity.name,
+                    color_hsl: activity.color_hsl,
+                    icon: activity.icon
+                }
+            };
+        });
+
+        logs = [...localOfflineLogs, ...loadedLogs];
         isLoading = false;
     }
 
@@ -249,6 +281,15 @@
             showSeconds = precision === 'seconds';
         }
         fetchLogs();
+
+        // Listen for sync event to refresh the UI immediately
+        const handleSync = () => {
+            fetchLogs();
+        };
+        window.addEventListener('ohdiary_sync_logs', handleSync);
+        return () => {
+            window.removeEventListener('ohdiary_sync_logs', handleSync);
+        };
     });
     // Multi-Select / Long-Press State
     let isSelectionMode = $state(false);
@@ -628,7 +669,14 @@
                     </div>
 
                     <div class="log-info">
-                        <div class="log-name" style="color: {color}">{log.activities?.name || 'Activity'}</div>
+                        <div class="log-name" style="color: {color}">
+                            {log.activities?.name || 'Activity'}
+                            {#if log.is_offline_pending}
+                                <span class="status-badge" style="background-color: var(--color-warning, #f59e0b); color: #000; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; animation: pulse 1.5s infinite">
+                                    กำลังซิงค์...
+                                </span>
+                            {/if}
+                        </div>
                         <div class="log-time-range">
                             {#if log.start_time}
                                 {formatTimeRange(log.start_time, log.end_time)}

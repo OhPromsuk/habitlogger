@@ -223,7 +223,7 @@
         padding: 12px;
         border-radius: var(--radius-lg);
         transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     }
 
     .type-item:hover {

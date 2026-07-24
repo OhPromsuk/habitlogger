@@ -522,24 +522,7 @@
         <button class="mark-all-btn" onclick={toggleAllTypes}>
             {selectedActivityIds.size === activities.length ? 'ยกเลิกทั้งหมด' : 'Mark/unmark all'}
         </button>
-
         <div class="picker-list">
-            <!-- Ungrouped activities first -->
-            {#each activities.filter(a => !a.category_id) as act}
-                <div
-                    class="picker-item"
-                    onclick={() => toggleActivity(act.id, null)}
-                    role="button"
-                    tabindex="0"
-                >
-                    <span class="picker-icon">{act.icon || '●'}</span>
-                    <span class="picker-name" style="color: hsl({act.color_hsl})">{act.name}</span>
-                    {#if selectedActivityIds.has(act.id)}
-                        <Check size={18} class="picker-check" />
-                    {/if}
-                </div>
-            {/each}
-
             <!-- Categories + their activities -->
             {#each categoryTree as cat}
                 {@const catActs = activities.filter(a => a.category_id === cat.id)}
@@ -584,6 +567,22 @@
                         </div>
                     {/each}
                 {/if}
+            {/each}
+
+            <!-- Ungrouped activities last -->
+            {#each activities.filter(a => !a.category_id) as act}
+                <div
+                    class="picker-item"
+                    onclick={() => toggleActivity(act.id, null)}
+                    role="button"
+                    tabindex="0"
+                >
+                    <span class="picker-icon">{act.icon || '●'}</span>
+                    <span class="picker-name" style="color: hsl({act.color_hsl})">{act.name}</span>
+                    {#if selectedActivityIds.has(act.id)}
+                        <Check size={18} class="picker-check" />
+                    {/if}
+                </div>
             {/each}
         </div>
     </div>
@@ -840,12 +839,13 @@
 }
 
 .type-picker-sheet {
-    background: #1e1e1e;
+    background: var(--bg-secondary, #ffffff);
     border-radius: 16px 16px 0 0;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
     animation: slideUp 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+    border-top: 1px solid var(--border-color, #e5e7eb);
 }
 
 .picker-header {
@@ -853,7 +853,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px 10px;
-    border-bottom: 1px solid var(--divider-color);
+    border-bottom: 1px solid var(--divider-color, #e5e7eb);
     flex-shrink: 0;
 }
 .picker-title {
@@ -878,7 +878,7 @@
     cursor: pointer;
     text-align: center;
     width: 100%;
-    border-bottom: 1px solid var(--divider-color);
+    border-bottom: 1px solid var(--divider-color, #e5e7eb);
     flex-shrink: 0;
 }
 .mark-all-btn:hover { color: var(--text-primary); }
@@ -896,10 +896,10 @@
     padding: 13px 20px;
     cursor: pointer;
     transition: background 0.1s;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    border-bottom: 1px solid var(--divider-color, #e5e7eb);
     position: relative;
 }
-.picker-item:hover { background: rgba(255,255,255,0.04); }
+.picker-item:hover { background: var(--bg-tertiary, #f3f4f6); }
 
 .picker-group {
     padding: 0;
